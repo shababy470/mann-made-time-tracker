@@ -111,6 +111,21 @@ editor.
 Start Time, End Time, Duration (hrs), Billable, Notes, Entry ID.
 Entry ID (col 12) is hidden and assigned lazily to old rows when first edited.
 
+**Data health, checked 2026-07-27:**
+
+- All 45 `People` rows have an `@mannmade.co.za` email. Nothing missing.
+  (`People` has a 4th column, `role`, that no code reads.)
+- **`Jan Kotze` logs time but has no `People` row.** Everything driven off
+  `People` — daily reminders, weekly digests, cost/rate figures — silently skips
+  them. Adding the row fixes all three at once.
+- `Time Log` row 1 has `Summarise time for` in A1 and `3` in B1, overwriting two
+  header labels. Harmless: every read starts at row 2. Someone's leftover
+  scratch working.
+- Matching between `Time Log` and `People` is **by typed name**, not email, so
+  it breaks on spelling. Note the sheet mixes first-name-only ("Robyn",
+  "Ronnie") with full names ("Simon Wrigley") — a person typing the other form
+  silently starts a second identity.
+
 **Jobs list** — read-only, owned by the business, **never write to it**.
 `getJobs` iterates *all* tabs so jobs from previous years stay searchable.
 Columns are found by matching header text, not fixed position, because humans
@@ -266,6 +281,12 @@ can touch it" risk and slightly widens the "who can change it" one.
 > **`sendWeeklyDigests` is not scheduled at all.** All the code exists
 > (`installWeeklyDigestTrigger` would set it to Fridays 17:00), but nobody ever
 > ran the installer. The weekly digest has never gone out.
+>
+> It is safe to switch on. It emails **only people with hours that week** —
+> about 22 on a normal week, measured against 20–26 Jul — skips everyone else
+> silently, and sends Shayne a recap of who got it. Rehearse with
+> `testWeeklyDigest` first: that sends a single sample digest to
+> `DIGEST_ADMIN_EMAIL` and nobody else.
 
 **Triggers run against `Head`, not a deployment version.** This is the single
 most important operational fact in this file: a `clasp push` changes what the
