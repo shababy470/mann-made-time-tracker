@@ -395,6 +395,24 @@ staff surveillance — and it should read that way in every email and label. Mos
 timesheet resistance comes from people believing they must account for every
 minute. Nearest half-hour is fine, and the UI should say so.
 
+The daily reminder carries that framing explicitly in its footer, and pairs it
+with a rotating quote (`TIME_QUOTES`, 20 entries) and a short reflection line
+(`REFLECTION_PROMPTS`). Three decisions there are deliberate and worth keeping:
+
+- **Rotated by date, not at random.** Everyone gets the same quote on the same
+  day, so it can become something people mention to each other rather than 45
+  private fortune cookies.
+- **Invitation, not audit.** "What did today actually go into?" rather than
+  "have you been intentional?" — the second reads as a demand to justify
+  yourself, which is exactly the tone this tool must avoid.
+- **Friday differs.** `reflectionForDate_` reserves a week-shaped prompt for
+  Fridays; end-of-week is where looking back actually lands.
+
+Quotes lean humane over hustle-culture on purpose. They are the company's voice,
+so check any addition sounds like MANNMADE — and check attribution, since famous
+quotes are widely misattributed ("The trouble is, you think you have time" is
+Jack Kornfield's, not the Buddha's, though it is nearly always credited to him).
+
 ---
 
 ## Working practices
