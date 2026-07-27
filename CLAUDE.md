@@ -27,7 +27,7 @@ handover was wrong, the correction is noted inline.
 | Apps Script project "Time tracker" | `12QLJffAthBngKU908QcXcgx8lr80s1AXsaL3mwLiVGdjHTL68qCZOFGe` |
 | Container spreadsheet "MANNMADE Time Log" | `1yZoZ_mfeEP37gZ1cfVFOVOJqB3a3hw1JyhtfIvJRV2U` |
 | Jobs list "MM Job Numbers" (read-only) | `1-ON0iZYt3gcum4eKDY8rtokI6SkSAOLam-HENf-fzf4` |
-| **Live deployment** (version 34, 15 Jul 2026) | `AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA` |
+| **Live deployment** (version 35, 27 Jul 2026) | `AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA` |
 
 Live web app URL — this is the one to hardcode in emails:
 
@@ -35,7 +35,17 @@ Live web app URL — this is the one to hardcode in emails:
 https://script.google.com/macros/s/AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA/exec
 ```
 
-There are **12 deployments** on the project. Only version 34 is current; the
+Redeploy without changing that URL:
+
+```bash
+clasp create-version "what changed"
+clasp update-deployment -V <n> -d "what changed" AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA
+```
+
+To roll back, run `update-deployment` again with the previous version number —
+it is the same one-line operation.
+
+There are **12 deployments** on the project. Only this one is current; the
 rest are abandoned experiments ("time tracker 3.0", "doDashboard", …) that
 still resolve to live URLs running old code. Worth archiving, carefully — see
 Deployment below.
@@ -269,7 +279,7 @@ would have reopened the hole from the other side.
 "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE" }
 ```
 
-> **Verified 2026-07-27:** the deployed manifest at version 34 was fetched from
+> **Verified 2026-07-27:** the deployed manifest was fetched from
 > the Apps Script API and is byte-identical to the one in `src/`. So the live
 > app really does run as `USER_DEPLOYING` with `access: ANYONE`. This is not
 > stale — it is what production is doing.
