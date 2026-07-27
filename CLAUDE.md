@@ -241,13 +241,44 @@ already broken the reminder emails once.
 
 ### Triggers
 
-Three installer functions exist. They must be run once, by hand, from the Apps
-Script editor — check **Triggers** in the UI to see what is actually scheduled:
+Google exposes no API for listing triggers, so this was read off the editor UI
+on 2026-07-27. **Four** were scheduled:
+
+| Function | Owner | Last run | Errors | Status |
+|---|---|---|---|---|
+| `sendTimesheetReminders` | Shayne | 26 Jul 16:14 | 0% | healthy |
+| `syncJobBudgetsAuto` | Shayne | 27 Jul 06:32 | 0% | healthy |
+| `dailyAutoImport_` | Shayne | 27 Jul 07:43 | **100%** | broken |
+| `dailyAutoImport_` | *another user* | 27 Jul 07:48 | **100%** | broken |
+
+**`dailyAutoImport_` does not exist.** Verified: not in the current code, not in
+any of the 34 saved versions, and not in any of the four other Apps Script
+projects in Shayne's Drive. Two triggers therefore fire every morning and fail
+every time. (The "function not found" cause is inference — confirming it needs
+Cloud Logging, which needs a GCP project linked to the script. Not done.)
+
+Both should be deleted. Note the second is owned by **another user** — Shayne
+cannot delete that one; only its owner can. That trigger is also proof someone
+else holds edit access to this script, which slightly softens the "only Shayne
+can touch it" risk and slightly widens the "who can change it" one.
+
+> **`sendWeeklyDigests` is not scheduled at all.** All the code exists
+> (`installWeeklyDigestTrigger` would set it to Fridays 17:00), but nobody ever
+> ran the installer. The weekly digest has never gone out.
+
+**Triggers run against `Head`, not a deployment version.** This is the single
+most important operational fact in this file: a `clasp push` changes what the
+reminder and budget-alert emails do **immediately**, with no redeploy step and
+no version bump to review. The web app keeps serving version 34 until it is
+redeployed, but the emails do not wait. Treat any push that touches email code
+as a live change.
+
+Three installer functions exist and are run by hand from the editor:
 
 | Installer | Installs | Schedule |
 |---|---|---|
 | `installDailyReminderTrigger` | `sendTimesheetReminders` | weekdays ~16:00 |
-| `installWeeklyDigestTrigger` | `sendWeeklyDigests` | weekly |
+| `installWeeklyDigestTrigger` | `sendWeeklyDigests` | Fridays 17:00 |
 | `installBudgetSyncTrigger` | `syncJobBudgetsAuto` | periodic |
 
 ---
