@@ -188,10 +188,11 @@ or mismatched email — check all 46 rows before shipping it.
 
 3. **`ScriptApp.getService().getUrl()` is unsafe inside triggered functions.**
    It can return the `/dev` URL, which only works for accounts with edit access
-   to the script. Staff clicking it get an error. **This is still live** in
-   three places: `accessDeniedPage_` (line ~87), `sendBudgetAlertEmail_`
-   (~1969) and `buildReminderHtml_` (~2275). The last two run on triggers and
-   email real staff. Fix by hardcoding the `/exec` URL in a constant.
+   to the script. Staff clicking it get an error. **Fixed 2026-07-27** — all
+   three sites (`accessDeniedPage_`, `sendBudgetAlertEmail_`,
+   `buildReminderHtml_`) now read the `WEB_APP_URL` constant at the top of
+   `Code.gs`. Don't reintroduce the call. If the deployment is ever recreated
+   rather than updated in place, update that constant.
 
 4. **Don't put `/a/mannmade.co.za/` in URLs sent to staff.** It pins the link
    to a specific Google account context and breaks for anyone signed into a

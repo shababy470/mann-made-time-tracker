@@ -6,6 +6,14 @@ var SHEET_NAME    = 'Time Log';
 var JOBS_SHEET_ID = '1-ON0iZYt3gcum4eKDY8rtokI6SkSAOLam-HENf-fzf4';
 var JOBS_TAB_GID  = 775320995;
 
+// Live web app address. Hardcoded on purpose — do not replace this with
+// ScriptApp.getService().getUrl(). Inside a triggered function that call can
+// return the /dev URL, which only opens for accounts with edit access to this
+// script, so staff clicking the button in a reminder email get an error.
+// If the deployment is ever recreated (rather than updated in place), the URL
+// changes and this constant must be updated to match.
+var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA/exec';
+
 // Budgets, locks & reminders
 var BUDGET_SHEET_NAME   = 'Job Budgets';
 var SETTINGS_SHEET_NAME = 'Settings';
@@ -83,8 +91,7 @@ function getUserRole() {
 // Because access is "anyone with a Google account", our code runs and can show
 // this instead of Google's cryptic "unable to open the file" error.
 function accessDeniedPage_() {
-  var appUrl = '';
-  try { appUrl = ScriptApp.getService().getUrl() || ''; } catch (e) {}
+  var appUrl  = WEB_APP_URL;
   var chooser = 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(appUrl);
   var email   = currentUserEmail_();
   var who = email
@@ -1965,8 +1972,7 @@ function sendBudgetAlertEmail_(jobs) {
     );
   }).join('');
 
-  var url = '';
-  try { url = ScriptApp.getService().getUrl() || ''; } catch(e) {}
+  var url = WEB_APP_URL;
 
   var html =
     '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif">' +
@@ -2271,8 +2277,7 @@ function sendTimesheetReminders() {
 }
 
 function buildReminderHtml_(firstName, hrs) {
-  var url = '';
-  try { url = ScriptApp.getService().getUrl() || ''; } catch(e) {}
+  var url = WEB_APP_URL;
   var copy = hrs > 0
     ? 'You\'ve only logged <strong style="color:#111">' + hrs.toFixed(1) + ' hours</strong> so far today. If there\'s more to add, now\'s a good time.'
     : 'You haven\'t logged any time today. Two minutes now saves a scramble at month end.';
