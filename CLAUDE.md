@@ -27,7 +27,7 @@ handover was wrong, the correction is noted inline.
 | Apps Script project "Time tracker" | `12QLJffAthBngKU908QcXcgx8lr80s1AXsaL3mwLiVGdjHTL68qCZOFGe` |
 | Container spreadsheet "MANNMADE Time Log" | `1yZoZ_mfeEP37gZ1cfVFOVOJqB3a3hw1JyhtfIvJRV2U` |
 | Jobs list "MM Job Numbers" (read-only) | `1-ON0iZYt3gcum4eKDY8rtokI6SkSAOLam-HENf-fzf4` |
-| **Live deployment** (version 35, 27 Jul 2026) | `AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA` |
+| **Live deployment** (version 36, 27 Jul 2026) | `AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA` |
 
 Live web app URL — this is the one to hardcode in emails:
 
@@ -125,11 +125,13 @@ Entry ID (col 12) is hidden and assigned lazily to old rows when first edited.
 
 - All 45 `People` rows have an `@mannmade.co.za` email. Nothing missing.
   (`People` has a 4th column, `role`, that no code reads.)
-- **Two people need a `People` row before the identity fix is deployed:**
-  `Jan Kotze` (logs time, no row at all) and `mic@mannmade.co.za` (on the HOD
-  allowlist, no row). Since the fix fails closed, both would be unable to log
-  time once the web app is redeployed. Everything else driven off `People` —
-  reminders, digests, cost figures — already skips them silently today.
+- **`Jan Kotze` and `mic@mannmade.co.za` have both left.** Neither has a
+  `People` row and neither is getting one, so neither can log time — the
+  identity fix fails closed. Mic was removed from `HOD_EMAILS` on 2026-07-27,
+  which takes away the Dashboard; Jan's 4 logged entries stay in the Time Log
+  as a record of work done. Note that removing someone from `HOD_EMAILS` does
+  **not** lock them out: any `@mannmade.co.za` address still resolves to
+  `staff`. Disabling the Google account is what actually does that.
 - **Seven emails appear twice under different spellings.** Handled in code by
   alias matching, but worth deduping in the sheet so the Dashboard stops showing
   people twice. Row counts show which spelling to keep:
@@ -165,7 +167,7 @@ maintain the sheet and columns move. Keep it that way.
 There are two roles, resolved from the visitor's authenticated Google email
 (`Session.getActiveUser()`), so it can't be spoofed from the frontend:
 
-- Email on the `HOD_EMAILS` allowlist (14 addresses, hardcoded at the top of
+- Email on the `HOD_EMAILS` allowlist (13 addresses, hardcoded at the top of
   `Code.gs`) → **`hod`** — sees Track, My Logs, **and** Dashboard.
 - Any other `@mannmade.co.za` address → **`staff`** — Track and My Logs only.
 - Anything else → denied, shown `accessDeniedPage_()`.

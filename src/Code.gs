@@ -39,8 +39,10 @@ var HOD_EMAILS = [
   'gareth@mannmade.co.za',
   'gloire@mannmade.co.za',
   'shelley@mannmade.co.za',
-  'bradley@mannmade.co.za',
-  'mic@mannmade.co.za'
+  'bradley@mannmade.co.za'
+  // mic@mannmade.co.za removed 2026-07-27 — left the company. Note this only
+  // takes away the Dashboard: any @mannmade.co.za address still resolves to
+  // 'staff'. Disabling the Google account is what actually locks a leaver out.
 ];
 
 // Domain whose members are automatically granted staff access.
