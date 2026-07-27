@@ -580,13 +580,30 @@
   });
 
   // ROLE — HODs see the Dashboard tab; everyone else gets Track + My Logs only.
+  // Also fills in the name box from the signed-in Google account and locks it:
+  // the server now decides whose hours these are, so a typed name would only
+  // mislead. If the account has no People row the box stays open, but every
+  // action will come back with the server's "ask to be added" message.
   function applyRole(){
     google.script.run.withSuccessHandler(function(role){
       isHod=!!(role&&role.isHod);
       if(isHod)document.getElementById('tab-dashboard').style.display='';
+      var el=document.getElementById('person');
+      if(role&&role.person){
+        el.value=role.person;
+        el.readOnly=true;
+        el.style.opacity='0.75';
+        el.style.cursor='not-allowed';
+        el.title='Taken from your Google account — '+(role.email||'');
+        localStorage.setItem('mm_person',role.person);
+      }else{
+        el.placeholder='Not in the People sheet yet';
+      }
     }).withFailureHandler(function(){isHod=false;}).getUserRole();
   }
 
+  // Shows the last-used name immediately so the field isn't blank while
+  // applyRole() is still in flight. The server value overwrites it a moment later.
   function restoreIdentity(){var s=localStorage.getItem('mm_person');if(s)document.getElementById('person').value=s;}
   function setDefaultManualDate(){var d=new Date();var v=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');document.getElementById('manualDate').value=v;document.getElementById('calDate').value=v;}
 
@@ -644,7 +661,7 @@
       box.innerHTML='<div style="border:1px solid var(--border-strong);border-radius:8px;overflow:hidden">'+calEventsData.map(function(ev,i){
         return'<div class="job-option" onclick="useCalEvent('+i+')"><div class="job-opt-num">'+ev.start+' – '+ev.end+'</div><div class="job-opt-name">'+escHtml(ev.title)+'</div><div class="job-opt-meta">Tap to pre-fill timesheet →</div></div>';
       }).join('')+'</div>';
-    }).withFailureHandler(function(){box.innerHTML='<div class="loading-msg" style="color:var(--accent)">Error loading calendar</div>';}).getCalendarEvents(person,dv);
+    }).withFailureHandler(function(e){box.innerHTML='<div class="loading-msg" style="color:var(--accent)">'+errMsg(e,'Error loading calendar')+'</div>';}).getCalendarEvents(person,dv);
   }
   function useCalEvent(i){
     var ev=calEventsData[i];if(!ev)return;
@@ -676,7 +693,7 @@
   function startTimer(){var person=document.getElementById('person').value.trim(),task=document.getElementById('task').value.trim();if(!person){shake('person');return;}if(!selectedJob){shake('jobSearch');return;}if(!task){shake('task');return;}localStorage.setItem('mm_person',person);startTime=new Date();isRunning=true;isPaused=false;totalPausedMs=0;pausedAt=null;timerInterval=setInterval(updateTimerDisplay,1000);updateTimerDisplay();document.getElementById('timerDisplay').classList.add('running');document.getElementById('timerDisplay').classList.remove('paused');document.getElementById('timerStatus').classList.add('running');document.getElementById('timerStatus').innerHTML='<span class="dot"></span>TRACKING';document.getElementById('pauseTally').textContent='';document.getElementById('btnRow').innerHTML='<button class="btn-pause" onclick="pauseTimer()">⏸ &nbsp;PAUSE</button><button class="btn-stop" onclick="stopTimer()">■ &nbsp;STOP</button><button class="btn-discard" onclick="discardTimer()" style="grid-column:1/-1">✕ &nbsp;DISCARD</button>';lockFields(true);}
   function pauseTimer(){if(!isRunning||isPaused)return;isPaused=true;pausedAt=new Date();clearInterval(timerInterval);document.getElementById('timerDisplay').classList.remove('running');document.getElementById('timerDisplay').classList.add('paused');document.getElementById('timerStatus').classList.remove('running');document.getElementById('timerStatus').textContent='PAUSED';document.getElementById('btnRow').innerHTML='<button class="btn-resume" onclick="resumeTimer()">▶ &nbsp;RESUME</button><button class="btn-stop" onclick="stopTimer()">■ &nbsp;STOP</button><button class="btn-discard" onclick="discardTimer()" style="grid-column:1/-1">✕ &nbsp;DISCARD</button>';}
   function resumeTimer(){if(!isRunning||!isPaused)return;totalPausedMs+=(new Date()-pausedAt);isPaused=false;pausedAt=null;timerInterval=setInterval(updateTimerDisplay,1000);updateTimerDisplay();document.getElementById('timerDisplay').classList.add('running');document.getElementById('timerDisplay').classList.remove('paused');document.getElementById('timerStatus').classList.add('running');document.getElementById('timerStatus').innerHTML='<span class="dot"></span>TRACKING';var pm=Math.round(totalPausedMs/60000);document.getElementById('pauseTally').textContent=pm>0?pm+'min'+(pm!==1?'s':'')+' paused':'';document.getElementById('btnRow').innerHTML='<button class="btn-pause" onclick="pauseTimer()">⏸ &nbsp;PAUSE</button><button class="btn-stop" onclick="stopTimer()">■ &nbsp;STOP</button><button class="btn-discard" onclick="discardTimer()" style="grid-column:1/-1">✕ &nbsp;DISCARD</button>';}
-  function stopTimer(){if(!isRunning)return;var endTime=new Date();if(isPaused&&pausedAt)totalPausedMs+=(endTime-pausedAt);clearInterval(timerInterval);isRunning=false;isPaused=false;var effectiveEnd=new Date(endTime.getTime()-totalPausedMs);var entry=buildEntry(startTime.toISOString(),effectiveEnd.toISOString(),false);document.getElementById('timerStatus').textContent='SAVING…';google.script.run.withSuccessHandler(function(r){if(!r||r.success===false){showToast((r&&r.error)||'ERROR — COULD NOT SAVE');resetLiveUI();return;}addToLocalLog(entry,r.duration,false);resetLiveUI();showToast('LOGGED · '+r.duration+' hrs · '+entry.jobNumber);if(r.warning)setTimeout(function(){showToast(r.warning);},3200);dashLoaded=false;}).withFailureHandler(function(){showToast('ERROR — COULD NOT SAVE');resetLiveUI();}).logTime(entry);}
+  function stopTimer(){if(!isRunning)return;var endTime=new Date();if(isPaused&&pausedAt)totalPausedMs+=(endTime-pausedAt);clearInterval(timerInterval);isRunning=false;isPaused=false;var effectiveEnd=new Date(endTime.getTime()-totalPausedMs);var entry=buildEntry(startTime.toISOString(),effectiveEnd.toISOString(),false);document.getElementById('timerStatus').textContent='SAVING…';google.script.run.withSuccessHandler(function(r){if(!r||r.success===false){showToast((r&&r.error)||'ERROR — COULD NOT SAVE');resetLiveUI();return;}addToLocalLog(entry,r.duration,false);resetLiveUI();showToast('LOGGED · '+r.duration+' hrs · '+entry.jobNumber);if(r.warning)setTimeout(function(){showToast(r.warning);},3200);dashLoaded=false;}).withFailureHandler(function(e){showToast(errMsg(e,'ERROR — COULD NOT SAVE'));resetLiveUI();}).logTime(entry);}
   function discardTimer(){clearInterval(timerInterval);isRunning=false;isPaused=false;startTime=null;totalPausedMs=0;pausedAt=null;resetLiveUI();showToast('ENTRY DISCARDED');}
   function updateTimerDisplay(){var e=Math.floor((new Date()-startTime-totalPausedMs)/1000);if(e<0)e=0;document.getElementById('timerDisplay').textContent=String(Math.floor(e/3600)).padStart(2,'0')+':'+String(Math.floor((e%3600)/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0');}
   function resetLiveUI(){document.getElementById('timerDisplay').textContent='00:00:00';document.getElementById('timerDisplay').classList.remove('running','paused');document.getElementById('timerStatus').classList.remove('running');document.getElementById('timerStatus').textContent='READY';document.getElementById('pauseTally').textContent='';document.getElementById('btnRow').innerHTML='<button class="btn-start" onclick="startTimer()">▶ &nbsp;START TIMER</button>';lockFields(false);document.getElementById('task').value='';document.getElementById('notes').value='';startTime=null;totalPausedMs=0;pausedAt=null;}
@@ -684,7 +701,7 @@
 
   // MANUAL
   function updateDurationPreview(){var dv=document.getElementById('manualDate').value,sv=document.getElementById('manualStart').value,ev=document.getElementById('manualEnd').value,p=document.getElementById('durationPreview'),l=document.getElementById('durationLabel');if(!dv||!sv||!ev){p.textContent='—';l.textContent='';return;}var diff=new Date(dv+'T'+ev)-new Date(dv+'T'+sv);if(diff<=0){p.style.fontSize='16px';p.textContent='End must be after start';l.textContent='';return;}p.style.fontSize='';p.textContent=Math.floor(diff/3600000)+'h '+(Math.floor((diff%3600000)/60000)>0?Math.floor((diff%3600000)/60000)+'m':'');l.textContent=(diff/3600000).toFixed(2)+' hrs';}
-  function logManual(){var person=document.getElementById('person').value.trim(),task=document.getElementById('task').value.trim(),dv=document.getElementById('manualDate').value,sv=document.getElementById('manualStart').value,ev=document.getElementById('manualEnd').value;if(!person){shake('person');return;}if(!selectedJob){shake('jobSearch');return;}if(!task){shake('task');return;}if(!dv){shake('manualDate');return;}if(!sv){shake('manualStart');return;}if(!ev){shake('manualEnd');return;}var sd=new Date(dv+'T'+sv),ed=new Date(dv+'T'+ev);if(ed<=sd){shake('manualEnd');showToast('END TIME MUST BE AFTER START');return;}localStorage.setItem('mm_person',person);var entry=buildEntry(sd.toISOString(),ed.toISOString(),true);var btn=document.querySelector('.btn-log');btn.disabled=true;btn.textContent='SAVING…';google.script.run.withSuccessHandler(function(r){btn.disabled=false;btn.textContent='✓   LOG THIS TIME';if(!r||r.success===false){showToast((r&&r.error)||'ERROR — COULD NOT SAVE');return;}addToLocalLog(entry,r.duration,true);document.getElementById('task').value='';document.getElementById('notes').value='';document.getElementById('manualStart').value='';document.getElementById('manualEnd').value='';document.getElementById('durationPreview').textContent='—';document.getElementById('durationLabel').textContent='';showToast('LOGGED · '+r.duration+' hrs · '+entry.jobNumber);if(r.warning)setTimeout(function(){showToast(r.warning);},3200);dashLoaded=false;}).withFailureHandler(function(){btn.disabled=false;btn.textContent='✓   LOG THIS TIME';showToast('ERROR — COULD NOT SAVE');}).logTime(entry);}
+  function logManual(){var person=document.getElementById('person').value.trim(),task=document.getElementById('task').value.trim(),dv=document.getElementById('manualDate').value,sv=document.getElementById('manualStart').value,ev=document.getElementById('manualEnd').value;if(!person){shake('person');return;}if(!selectedJob){shake('jobSearch');return;}if(!task){shake('task');return;}if(!dv){shake('manualDate');return;}if(!sv){shake('manualStart');return;}if(!ev){shake('manualEnd');return;}var sd=new Date(dv+'T'+sv),ed=new Date(dv+'T'+ev);if(ed<=sd){shake('manualEnd');showToast('END TIME MUST BE AFTER START');return;}localStorage.setItem('mm_person',person);var entry=buildEntry(sd.toISOString(),ed.toISOString(),true);var btn=document.querySelector('.btn-log');btn.disabled=true;btn.textContent='SAVING…';google.script.run.withSuccessHandler(function(r){btn.disabled=false;btn.textContent='✓   LOG THIS TIME';if(!r||r.success===false){showToast((r&&r.error)||'ERROR — COULD NOT SAVE');return;}addToLocalLog(entry,r.duration,true);document.getElementById('task').value='';document.getElementById('notes').value='';document.getElementById('manualStart').value='';document.getElementById('manualEnd').value='';document.getElementById('durationPreview').textContent='—';document.getElementById('durationLabel').textContent='';showToast('LOGGED · '+r.duration+' hrs · '+entry.jobNumber);if(r.warning)setTimeout(function(){showToast(r.warning);},3200);dashLoaded=false;}).withFailureHandler(function(e){btn.disabled=false;btn.textContent='✓   LOG THIS TIME';showToast(errMsg(e,'ERROR — COULD NOT SAVE'));}).logTime(entry);}
 
   // SHARED
   function buildEntry(s,e,isManual){return{person:document.getElementById('person').value.trim(),jobNumber:selectedJob.jobNumber,jobName:selectedJob.jobName,company:selectedJob.company,task:document.getElementById('task').value.trim(),notes:(isManual?'[manual entry] ':'')+document.getElementById('notes').value.trim(),billable:document.getElementById('billable').checked,startTime:s,endTime:e};}
@@ -694,6 +711,9 @@
   function fmtDate(str){if(!str)return'—';var d=new Date(str+'T12:00:00');return d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];}
   function shake(id){var el=document.getElementById(id);if(!el)return;el.classList.add('error-border');el.focus();setTimeout(function(){el.classList.remove('error-border');},1200);}
   function showToast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
+  // Server-side throws carry a message worth reading — "you're not in the People
+  // sheet" is useless as "ERROR — COULD NOT SAVE". Falls back when there isn't one.
+  function errMsg(e,fallback){return (e&&e.message)?e.message:fallback;}
 
   // DASHBOARD
   function loadDash(filter,btn){currentFilter=filter;document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active');});if(btn)btn.classList.add('active');document.getElementById('dashContent').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';google.script.run.withSuccessHandler(function(d){renderDash(d);dashLoaded=true;}).withFailureHandler(function(){document.getElementById('dashContent').innerHTML='<div class="empty-state">Error loading data</div>';}).getDashboardData(filter);}
@@ -1056,7 +1076,7 @@
     }
     who.innerHTML='Showing logs for <b>'+escapeAttr(person)+'</b>';
     document.getElementById('myLogsContent').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';
-    google.script.run.withSuccessHandler(function(d){myLogsData=d;renderMyLogs(d);}).withFailureHandler(function(){document.getElementById('myLogsContent').innerHTML='<div class="empty-state">Error loading your logs</div>';}).getMyLogs(person,filter);
+    google.script.run.withSuccessHandler(function(d){myLogsData=d;renderMyLogs(d);}).withFailureHandler(function(e){document.getElementById('myLogsContent').innerHTML='<div class="empty-state">'+errMsg(e,'Error loading your logs')+'</div>';}).getMyLogs(person,filter);
   }
   function renderMyLogs(d){
     var c=document.getElementById('myLogsContent');

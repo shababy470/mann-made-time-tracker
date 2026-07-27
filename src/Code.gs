@@ -81,10 +81,77 @@ function requireAccess_() {
   if (!currentRole_()) throw new Error('Not authorised — please sign in with your MANNMADE account.');
 }
 
-// Called by the front-end on load to decide which tabs to show.
+// ── WHO THE VISITOR IS, FOR DATA ──────────────────────────────
+// Access (above) has always come from the real Google login. Whose hours an
+// entry belongs to used to come from a free-text box in the browser, and the
+// two were never checked against each other — so anyone signed in could read a
+// colleague's entries, or read a calendar, simply by typing their name.
+//
+// These two resolve the name server-side by matching the authenticated email
+// against the People sheet, so the browser no longer gets a say.
+
+// Every People-sheet spelling that belongs to the current visitor's email.
+//
+// Several people are in the sheet twice under different spellings — "Leya" and
+// "Leya Tischhauser", "Marie Cillers" and "Marie Cilliers" — which has split
+// their logged history across two names. So reads match *any* spelling, while
+// writes always use the first (sheet order), letting the duplicates converge
+// instead of needing the sheet cleaned up first.
+//
+// Returns { person: canonical name or '', aliases: [all spellings] }.
+function resolveIdentity_() {
+  var email = currentUserEmail_();
+  if (!email) return { person: '', aliases: [] };
+  var people = loadPeopleDirectory();   // name -> email
+  var aliases = [];
+  for (var name in people) {
+    if (String(people[name] || '').trim().toLowerCase() === email) aliases.push(name);
+  }
+  return { person: aliases.length ? aliases[0] : '', aliases: aliases };
+}
+
+// True if a Time Log person cell belongs to the given identity.
+function isMine_(cell, identity) {
+  var v = String(cell || '').trim();
+  for (var i = 0; i < identity.aliases.length; i++) {
+    if (identity.aliases[i] === v) return true;
+  }
+  return false;
+}
+
+// Canonical People-sheet name for the current visitor, or '' if their email
+// has no row there.
+function resolvePerson_() {
+  return resolveIdentity_().person;
+}
+
+// Same, but throws a message the front-end shows verbatim. Used by everything
+// that reads or writes one person's data. Failing closed is deliberate: better
+// a clear "you're not in the People sheet" than silently filing someone's time
+// under the wrong name.
+function requireIdentity_() {
+  var identity = resolveIdentity_();
+  if (!identity.person) {
+    throw new Error('We can\'t match your account (' + (currentUserEmail_() || 'unknown') +
+      ') to a name in the People sheet. Ask ' + DIGEST_ADMIN_EMAIL + ' to add you, then reload.');
+  }
+  return identity;
+}
+
+function requirePerson_() {
+  return requireIdentity_().person;
+}
+
+// Called by the front-end on load to decide which tabs to show, and to fill in
+// the name field from the signed-in account rather than from localStorage.
 function getUserRole() {
   var role = currentRole_();
-  return { email: currentUserEmail_(), role: role, isHod: role === 'hod' };
+  return {
+    email:  currentUserEmail_(),
+    role:   role,
+    isHod:  role === 'hod',
+    person: role ? resolvePerson_() : ''
+  };
 }
 
 // Friendly page shown when an unauthorised / wrong account opens the web app.
@@ -209,6 +276,7 @@ function getJobs() {
 // ── LOG TIME ─────────────────────────────────────────────────
 function logTime(entry) {
   requireAccess_();
+  var person = requirePerson_();   // never trust entry.person
 
   // Month-end lock: reject entries dated before the lock date
   var lockErr = checkLock_(entry.startTime);
@@ -246,7 +314,7 @@ function logTime(entry) {
 
   sheet.appendRow([
     Utilities.formatDate(startDate, tz, 'yyyy-MM-dd'),
-    entry.person,
+    person,
     entry.jobNumber,
     entry.jobName,
     entry.company,
@@ -269,6 +337,7 @@ function logTime(entry) {
 // supplies one task + billable for the whole batch and a list of day/hours.
 function bulkLogTime(entries) {
   requireAccess_();
+  var person = requirePerson_();   // never trust entry.person
   if (!entries || !entries.length) return { success: false, count: 0, error: 'No entries supplied' };
 
   // Month-end lock: reject the batch if any entry falls in a locked period
@@ -306,7 +375,7 @@ function bulkLogTime(entries) {
     totalHrs += durationHrs;
     rowsToWrite.push([
       Utilities.formatDate(startDate, tz, 'yyyy-MM-dd'),
-      entry.person,
+      person,
       entry.jobNumber,
       entry.jobName,
       entry.company,
@@ -338,8 +407,10 @@ function bulkLogTime(entries) {
 // rowNumber fallback so they can be lazily assigned an ID on first edit.
 function getMyLogs(person, filter) {
   requireAccess_();
-  person = String(person || '').trim();
-  if (!person) return { person: '', entries: [], totalHrs: 0 };
+  // The `person` argument is ignored — kept only so the existing front-end call
+  // signature still works. Your own entries are the only ones you can read.
+  var identity = requireIdentity_();
+  person = identity.person;
 
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
@@ -360,7 +431,7 @@ function getMyLogs(person, filter) {
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
     if (!row[0]) continue;
-    if (String(row[1] || '').trim() !== person) continue;
+    if (!isMine_(row[1], identity)) continue;
     var d = row[0] instanceof Date ? row[0] : new Date(row[0]);
     if (d < from || d > today) continue;
 
@@ -413,8 +484,10 @@ function updateMyEntry(payload) {
   if (!sheet || sheet.getLastRow() < 2) return { success: false, error: 'No data' };
   ensureEntryIdColumn(sheet);
 
-  var person = String(payload.person || '').trim();
-  if (!person) return { success: false, error: 'Missing person' };
+  // Resolved from the login, not from payload.person — the old guard compared
+  // two values the caller supplied, so it stopped accidents but not intent.
+  var identity = requireIdentity_();
+  var person   = identity.person;
 
   var tz = Session.getScriptTimeZone();
   var lastRow = sheet.getLastRow();
@@ -437,8 +510,10 @@ function updateMyEntry(payload) {
   var row = data[targetIdx];
   var sheetRow = targetIdx + 2;
 
-  // Ownership guard — a person can only edit their own logged time.
-  if (String(row[1] || '').trim() !== person) {
+  // Ownership guard — a person can only edit their own logged time. Matches any
+  // of their People-sheet spellings, so older entries filed under a duplicate
+  // name are still editable.
+  if (!isMine_(row[1], identity)) {
     return { success: false, error: 'You can only edit your own entries.' };
   }
 
@@ -542,6 +617,8 @@ var EDIT_NOTIFY_ADMIN = false;
 // ── TODAY SUMMARY ─────────────────────────────────────────────
 function getTodaySummary(person) {
   requireAccess_();
+  var identity = requireIdentity_();   // argument ignored; your own rows only
+  person = identity.person;
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return [];
@@ -555,7 +632,7 @@ function getTodaySummary(person) {
     var rowDate = row[0] instanceof Date
       ? Utilities.formatDate(row[0], Session.getScriptTimeZone(), 'yyyy-MM-dd')
       : String(row[0]).substring(0, 10);
-    if (rowDate === today && (!person || row[1] === person)) {
+    if (rowDate === today && isMine_(row[1], identity)) {
       result.push({
         date: rowDate, person: row[1], jobNumber: row[2],
         jobName: row[3], company: row[4], task: row[5],
@@ -977,11 +1054,11 @@ function testWeeklyDigest() {
   if (!names.length) return 'No people found in Time Log.';
 
   var target = names[0];
-  var digest = getWeeklyDigestForPerson(target, bounds.start, bounds.end);
+  var digest = getWeeklyDigestForPerson_(target, bounds.start, bounds.end);
   if (!digest || digest.totalHrs === 0) {
     // Fall back to any person with hours this week
     for (var i = 0; i < names.length; i++) {
-      var d = getWeeklyDigestForPerson(names[i], bounds.start, bounds.end);
+      var d = getWeeklyDigestForPerson_(names[i], bounds.start, bounds.end);
       if (d && d.totalHrs > 0) { digest = d; target = names[i]; break; }
     }
   }
@@ -1013,7 +1090,7 @@ function sendWeeklyDigests() {
   Object.keys(people).forEach(function(name) {
     var email = people[name];
     if (!email) { skipped.push(name + ' (no email)'); return; }
-    var digest = getWeeklyDigestForPerson(name, bounds.start, bounds.end);
+    var digest = getWeeklyDigestForPerson_(name, bounds.start, bounds.end);
     if (!digest || digest.totalHrs === 0) { skipped.push(name + ' (no hours)'); return; }
     var html = buildWeeklyDigestHtml(digest, bounds.start, bounds.end);
     var subject = 'Your week · ' + formatRange(bounds.start, bounds.end);
@@ -1085,7 +1162,11 @@ function loadPeopleDirectory() {
 }
 
 // ── Digest data for one person, one week ──────────────────────
-function getWeeklyDigestForPerson(person, start, end) {
+// Trailing underscore is deliberate: it makes this callable only from inside the
+// script, never from the browser via google.script.run. It takes a name as an
+// argument and returns that person's week, so leaving it public would have
+// reopened exactly the hole the identity pinning above closes.
+function getWeeklyDigestForPerson_(person, start, end) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return null;
@@ -2149,8 +2230,15 @@ function lockPreviousMonth() {
 function getCalendarEvents(person, dateStr) {
   requireAccess_();
   try {
+    // `person` is ignored. This used to take the name straight from the browser,
+    // and because the web app runs as USER_DEPLOYING, CalendarApp used the
+    // deploying user's permissions — so any signed-in member of staff could
+    // read the titles and times of any calendar that account could see,
+    // including its own. You now only ever get your own calendar.
+    person = requirePerson_();
+
     var people = loadPeopleDirectory();
-    var email  = String(people[String(person || '').trim()] || '').trim();
+    var email  = String(people[person] || '').trim();
     var me     = Session.getEffectiveUser().getEmail();
 
     if (!email) {

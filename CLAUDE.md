@@ -115,9 +115,23 @@ Entry ID (col 12) is hidden and assigned lazily to old rows when first edited.
 
 - All 45 `People` rows have an `@mannmade.co.za` email. Nothing missing.
   (`People` has a 4th column, `role`, that no code reads.)
-- **`Jan Kotze` logs time but has no `People` row.** Everything driven off
-  `People` — daily reminders, weekly digests, cost/rate figures — silently skips
-  them. Adding the row fixes all three at once.
+- **Two people need a `People` row before the identity fix is deployed:**
+  `Jan Kotze` (logs time, no row at all) and `mic@mannmade.co.za` (on the HOD
+  allowlist, no row). Since the fix fails closed, both would be unable to log
+  time once the web app is redeployed. Everything else driven off `People` —
+  reminders, digests, cost figures — already skips them silently today.
+- **Seven emails appear twice under different spellings.** Handled in code by
+  alias matching, but worth deduping in the sheet so the Dashboard stops showing
+  people twice. Row counts show which spelling to keep:
+  `Leya Tischhauser` (357) over `Leya` (6); `Ruan Tischhauser` (184) over
+  `Ruan Tischhause` (22); `Tshepo Kgame` (173) over `Tshepo` (2);
+  `Pakeng Mphahlele` (26) over `Pakeng` (5); `Charlotte Maja` (62) over
+  `charlotte maja` (4); `Shaakirah Greeff` (31) over `shaakirah Greeff` (1).
+  `Marie` is the awkward one — the *misspelled* `Marie Cillers` holds 880 rows
+  against 2 for `Marie Cilliers`, so fixing it properly means renaming in the
+  Time Log too, not just the People sheet.
+- One `Time Log` row has `11:17:00` in the Person column — a stray value from a
+  mis-pasted entry. Harmless, one row.
 - `Time Log` row 1 has `Summarise time for` in A1 and `3` in B1, overwriting two
   header labels. Harmless: every read starts at row 2. Someone's leftover
   scratch working.
@@ -183,10 +197,36 @@ member passes. Consequences, all insider-only but real:
   can request any calendar Shayne can read — including Shayne's own — and get
   back event titles and times.
 
-**The fix**, when we get to it: resolve `person` server-side from the
-authenticated email via the `People` sheet, and stop trusting the parameter.
-Contained change, but it will break for anyone whose `People` row has a missing
-or mismatched email — check all 46 rows before shipping it.
+**Fixed 2026-07-27.** `resolveIdentity_()` matches the authenticated email
+against the `People` sheet and returns `{ person, aliases }`. `requireIdentity_()`
+is the same thing but throws a message the front-end shows verbatim. Applied in
+`logTime`, `bulkLogTime`, `getMyLogs`, `updateMyEntry`, `getTodaySummary` and
+`getCalendarEvents` — all of which now **ignore** the name the browser sends.
+The front-end fills the name box from the login and makes it read-only.
+
+Two things worth knowing about that fix:
+
+- **Aliases exist because the sheet has people in it twice.** Seven emails map
+  to two spellings each ("Leya" / "Leya Tischhauser"). Reads match *every*
+  spelling via `isMine_()`; writes use the first row in sheet order. Without
+  this, four people would have lost most of their history from My Logs — 747
+  rows in total, e.g. Leya would have seen 6 entries instead of 363.
+- **It fails closed.** No `People` row means no logging, with a message telling
+  you to ask to be added. That is deliberate — the alternative is silently
+  filing someone's time under the wrong name.
+
+`getWeeklyDigestForPerson_` was renamed with a trailing underscore in the same
+pass. It takes a name and returns that person's week, and *any* global function
+is reachable from the browser via `google.script.run`, so leaving it public
+would have reopened the hole from the other side.
+
+> **Still open — admin functions have no authorisation.** `sendWeeklyDigests`,
+> `lockPreviousMonth`, `syncJobBudgets`, `importCalendarMeetings` and the three
+> `install*Trigger` functions are all global and unguarded, so any signed-in
+> staff member could invoke them from the browser console. Adding
+> `requireHod_()` is one line each, but do it carefully: several also run from
+> triggers, where `Session.getActiveUser()` is less reliable, and a wrong guard
+> would break the live reminder emails.
 
 ---
 
