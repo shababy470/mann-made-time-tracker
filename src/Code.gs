@@ -2354,7 +2354,7 @@ function sendTimesheetReminders() {
     MailApp.sendEmail({
       to: email,
       subject: 'Don\'t forget your timesheet — ' + Utilities.formatDate(now, tz, 'EEE d MMM'),
-      htmlBody: buildReminderHtml_(firstName, hrs),
+      htmlBody: buildReminderHtml_(firstName, hrs, now),
       name: DIGEST_SENDER_NAME,
       replyTo: DIGEST_ADMIN_EMAIL
     });
@@ -2364,8 +2364,65 @@ function sendTimesheetReminders() {
   Logger.log('Reminders sent: ' + (sent.length ? sent.join(', ') : 'none — everyone is up to date'));
 }
 
-function buildReminderHtml_(firstName, hrs) {
-  var url = WEB_APP_URL;
+// ── QUOTES & REFLECTION ───────────────────────────────────────
+// One quote a day, rotating. Deliberately chosen to be humane rather than
+// hustle-culture: the point is "your time is your life", not "work harder".
+// Everyone gets the SAME quote on the same day — it's rotated by date, not
+// picked at random per person — so it can become something people mention to
+// each other rather than 45 private fortune cookies.
+var TIME_QUOTES = [
+  { q: 'How we spend our days is, of course, how we spend our lives.', a: 'Annie Dillard' },
+  { q: 'It is not that we have a short time to live, but that we waste a lot of it.', a: 'Seneca' },
+  { q: 'All we have to decide is what to do with the time that is given us.', a: 'J.R.R. Tolkien' },
+  { q: 'Time is the coin of your life. It is the only coin you have, and only you can determine how it will be spent.', a: 'Carl Sandburg' },
+  { q: 'If you love life, don\'t waste time, for time is what life is made up of.', a: 'Bruce Lee' },
+  { q: 'It is not enough to be busy. The question is: what are we busy about?', a: 'Henry David Thoreau' },
+  { q: 'Time isn\'t the main thing. It\'s the only thing.', a: 'Miles Davis' },
+  { q: 'Yesterday is gone. Tomorrow has not yet come. We have only today. Let us begin.', a: 'Mother Teresa' },
+  { q: 'Time is what we want most, but what we use worst.', a: 'William Penn' },
+  { q: 'You may delay, but time will not.', a: 'Benjamin Franklin' },
+  { q: 'The two most powerful warriors are patience and time.', a: 'Leo Tolstoy' },
+  { q: 'Guard well your spare moments. They are like uncut diamonds.', a: 'Ralph Waldo Emerson' },
+  { q: 'Time flies over us, but leaves its shadow behind.', a: 'Nathaniel Hawthorne' },
+  { q: 'Nothing is a waste of time if you use the experience wisely.', a: 'Auguste Rodin' },
+  { q: 'How did it get so late so soon?', a: 'Dr. Seuss' },
+  { q: 'We must use time as a tool, not as a couch.', a: 'John F. Kennedy' },
+  { q: 'Better three hours too soon than a minute too late.', a: 'William Shakespeare' },
+  { q: 'Time is the most valuable thing a person can spend.', a: 'Theophrastus' },
+  { q: 'The bad news is time flies. The good news is you\'re the pilot.', a: 'Michael Altshuler' },
+  { q: 'The trouble is, you think you have time.', a: 'Jack Kornfield' }
+];
+
+// Short invitations to look back at the day. Phrased as an open question, never
+// as "account for yourself" — the tone this email lands in matters more than
+// the words. Index 0 is reserved for Friday, where a week-shaped question fits.
+var REFLECTION_PROMPTS = [
+  'That\'s the week. What did it go into?',
+  'What did today actually go into?',
+  'Worth a look back before the day blurs.',
+  'Where did the hours actually land today?',
+  'A minute to think about how today was spent.'
+];
+
+// Same quote for everybody on a given day, cycling through the list.
+function quoteForDate_(date) {
+  var epoch = Math.floor(date.getTime() / 86400000);
+  return TIME_QUOTES[((epoch % TIME_QUOTES.length) + TIME_QUOTES.length) % TIME_QUOTES.length];
+}
+
+// Friday gets the week-shaped prompt; other weekdays rotate through the rest.
+function reflectionForDate_(date) {
+  if (date.getDay() === 5) return REFLECTION_PROMPTS[0];
+  var epoch = Math.floor(date.getTime() / 86400000);
+  var n = REFLECTION_PROMPTS.length - 1;
+  return REFLECTION_PROMPTS[1 + (((epoch % n) + n) % n)];
+}
+
+function buildReminderHtml_(firstName, hrs, when) {
+  var url  = WEB_APP_URL;
+  var date = when || new Date();
+  var quote      = quoteForDate_(date);
+  var reflection = reflectionForDate_(date);
   var copy = hrs > 0
     ? 'You\'ve only logged <strong style="color:#111">' + hrs.toFixed(1) + ' hours</strong> so far today. If there\'s more to add, now\'s a good time.'
     : 'You haven\'t logged any time today. Two minutes now saves a scramble at month end.';
@@ -2381,11 +2438,29 @@ function buildReminderHtml_(firstName, hrs) {
           '<div style="font-size:15px;color:#222;line-height:1.5">Hey ' + escapeHtml(firstName) + ',</div>' +
           '<div style="font-size:14px;color:#444;line-height:1.6;margin-top:10px">' + copy + '</div>' +
         '</td></tr>' +
+        // Quote of the day — the pause before the ask.
+        '<tr><td style="padding:18px 28px 4px">' +
+          '<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>' +
+            '<td style="width:3px;background:#f5c400"></td>' +
+            '<td style="padding:2px 0 2px 16px">' +
+              '<div style="font-size:15px;color:#222;line-height:1.55;font-style:italic">“' + escapeHtml(quote.q) + '”</div>' +
+              '<div style="font-size:10px;color:#999;letter-spacing:0.14em;text-transform:uppercase;font-weight:700;margin-top:8px">' + escapeHtml(quote.a) + '</div>' +
+            '</td>' +
+          '</tr></table>' +
+        '</td></tr>' +
+        '<tr><td style="padding:14px 28px 0">' +
+          '<div style="font-size:14px;color:#444;line-height:1.6">' + escapeHtml(reflection) + '</div>' +
+        '</td></tr>' +
         (url ?
         '<tr><td style="padding:20px 28px 28px">' +
           '<a href="' + url + '" style="display:inline-block;background:#e8318a;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;text-decoration:none;padding:14px 26px;border-radius:3px">Log your time</a>' +
         '</td></tr>' : '<tr><td style="padding:8px 28px 28px"></td></tr>') +
-        '<tr><td style="background:#fafafa;padding:12px 28px;border-top:1px solid #eee"><div style="font-size:10px;color:#999;letter-spacing:0.15em;text-transform:uppercase;font-weight:700">MANNMADE · Time · Auto-reminder</div></td></tr>' +
+        // Says out loud what this is for. A daily nudge about your time reads as
+        // surveillance unless you tell people plainly that it isn't.
+        '<tr><td style="background:#fafafa;padding:14px 28px;border-top:1px solid #eee">' +
+          '<div style="font-size:12px;color:#777;line-height:1.55">Nearest half-hour is fine. This is so we bill our clients properly and know which jobs are worth doing — not to count anybody\'s minutes.</div>' +
+          '<div style="font-size:10px;color:#bbb;letter-spacing:0.15em;text-transform:uppercase;font-weight:700;margin-top:10px">MANNMADE · Time · Auto-reminder</div>' +
+        '</td></tr>' +
       '</table>' +
     '</td></tr></table></body></html>'
   );
