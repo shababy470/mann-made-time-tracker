@@ -22,31 +22,42 @@ var REMINDER_MIN_HOURS  = 1;    // remind anyone who logged less than this many 
 var REMINDER_HOUR       = 16;   // reminders go out around 16:00 on weekdays
 
 // ── ACCESS CONTROL ────────────────────────────────────────────
-// HODs see the full Dashboard (everyone's hours, job lookup, company/person
-// breakdowns). Everyone else in the domain gets Track + My Logs only. The check
-// keys off the visitor's authenticated Google email (Session.getActiveUser),
-// not the typed-in name, so it can't be spoofed from the front-end.
-var HOD_EMAILS = [
-  'shayne@mannmade.co.za',
-  'ronnie@mannmade.co.za',
-  'robyn@mannmade.co.za',
-  'tshepo@mannmade.co.za',
-  'dean@mannmade.co.za',
-  'youri@mannmade.co.za',
-  'ruan@mannmade.co.za',
-  'simon@mannmade.co.za',
-  'melissa@mannmade.co.za',
-  'gareth@mannmade.co.za',
-  'gloire@mannmade.co.za',
-  'shelley@mannmade.co.za',
-  'bradley@mannmade.co.za'
-  // mic@mannmade.co.za removed 2026-07-27 — left the company. Note this only
-  // takes away the Dashboard: any @mannmade.co.za address still resolves to
-  // 'staff'. Disabling the Google account is what actually locks a leaver out.
-];
-
-// Domain whose members are automatically granted staff access.
+// Two links, one deployment:
+//
+//   .../exec               TEAM link  — Track + My Logs (your own entries).
+//                                       No Dashboard, no Job Lookup, no
+//                                       all-staff data.
+//   .../exec?key=<HOD_KEY> HOD link   — everything.
+//
+// Two independent things have to be true to see all-staff data:
+//   1. You are signed in with a @mannmade.co.za Google account. This is what
+//      the web app's "anyone with a Google account" access plus the domain
+//      check below gives us, and it means the secret link on its own — leaked,
+//      forwarded, or found in someone's history — opens nothing.
+//   2. You presented the HOD key.
+//
+// HOD used to be an allowlist of emails (HOD_EMAILS), which meant an HOD saw
+// the Dashboard on any URL. That is exactly what the team link must not do, so
+// the allowlist is gone and the key is now the only thing that grants HOD.
+// Access no longer follows the person, it follows the link they open.
 var STAFF_DOMAIN = 'mannmade.co.za';
+
+// The HOD link key. Long random string, generated 2026-08-17.
+// Rotating it: replace this value, redeploy, and send out the new ?key= URL —
+// the old link stops working the moment the new code goes live.
+var HOD_KEY = 'ef7eb29e1899d9f53d5ad593a9bca6c00fa12a18f280763184a71300e74bf160';
+
+// True if `key` is the HOD key. Compares every character rather than bailing
+// out at the first mismatch, so the time it takes doesn't leak the key.
+function hodKeyValid_(key) {
+  key = String(key || '');
+  if (key.length !== HOD_KEY.length) return false;
+  var diff = 0;
+  for (var i = 0; i < key.length; i++) {
+    diff |= key.charCodeAt(i) ^ HOD_KEY.charCodeAt(i);
+  }
+  return diff === 0;
+}
 
 // Email of the current visitor (lowercased), or '' if unavailable.
 function currentUserEmail_() {
@@ -54,14 +65,13 @@ function currentUserEmail_() {
   catch (err) { return ''; }
 }
 
-// Resolve an email to a role: 'hod', 'staff', or '' (no access).
-//   - on the HOD allowlist            -> 'hod'
-//   - any other @mannmade.co.za email -> 'staff'
-//   - anything else / blank           -> '' (denied)
+// Resolve an email to a role: 'staff' or '' (no access).
+//   - any @mannmade.co.za email -> 'staff'
+//   - anything else / blank     -> '' (denied)
+// Whether that staffer also gets HOD is decided by the link key, not the email.
 function roleForEmail_(email) {
   email = String(email || '').trim().toLowerCase();
   if (!email) return '';
-  if (HOD_EMAILS.indexOf(email) !== -1) return 'hod';
   var at = email.lastIndexOf('@');
   if (at !== -1 && email.slice(at + 1) === STAFF_DOMAIN) return 'staff';
   return '';
@@ -70,12 +80,18 @@ function roleForEmail_(email) {
 // Role of the current visitor.
 function currentRole_() { return roleForEmail_(currentUserEmail_()); }
 
-// True if the current visitor is an HOD.
-function isHod_() { return currentRole_() === 'hod'; }
-
-// Throws if the current visitor is not an HOD. Guards dashboard data functions.
-function requireHod_() {
-  if (!isHod_()) throw new Error('Not authorised — this view is restricted to HODs.');
+// Throws unless the caller is signed-in staff AND presented the HOD key.
+//
+// The key check has to live here, not only in doGet. google.script.run calls go
+// straight to these functions without passing through doGet, so a team-link
+// user could otherwise open the browser console and call getDashboardData()
+// by hand. Every function that returns other people's hours takes the key as
+// its last argument and checks it here.
+function requireHod_(key) {
+  requireAccess_();
+  if (!hodKeyValid_(key)) {
+    throw new Error('Not authorised — this view is restricted to the HOD link.');
+  }
 }
 
 // Throws if the current visitor has no access at all (not HOD, not staff).
@@ -144,14 +160,16 @@ function requirePerson_() {
   return requireIdentity_().person;
 }
 
-// Called by the front-end on load to decide which tabs to show, and to fill in
-// the name field from the signed-in account rather than from localStorage.
-function getUserRole() {
+// Called by the front-end on load to fill in the name field from the signed-in
+// account rather than from localStorage, and to confirm the HOD flag the page
+// was rendered with. The page passes back the key doGet gave it; an empty or
+// wrong key simply comes back isHod:false.
+function getUserRole(key) {
   var role = currentRole_();
   return {
     email:  currentUserEmail_(),
     role:   role,
-    isHod:  role === 'hod',
+    isHod:  !!role && hodKeyValid_(key),
     person: role ? resolvePerson_() : ''
   };
 }
@@ -215,9 +233,23 @@ function ensureEntryIdColumn(sheet) {
   return sheet;
 }
 
-function doGet() {
+// Routing. Signed-in staff always get the app; the ?key= parameter decides
+// whether it renders as the team view or the HOD view.
+//
+// The page is a template so the answer is baked into the HTML at render time:
+// the team link never receives the key, so its copy of the page has nothing to
+// send to the HOD-only functions even if someone digs through the source. A
+// hand-edited URL with a missing or wrong key falls through to the team view.
+function doGet(e) {
   if (!currentRole_()) return accessDeniedPage_();
-  return HtmlService.createHtmlOutputFromFile('Index')
+
+  var isHod = hodKeyValid_(e && e.parameter ? e.parameter.key : '');
+
+  var page = HtmlService.createTemplateFromFile('Index');
+  page.isHod  = isHod;
+  page.hodKey = isHod ? HOD_KEY : '';
+
+  return page.evaluate()
     .setTitle('MANNMADE · Time Tracker')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -647,8 +679,8 @@ function getTodaySummary(person) {
 }
 
 // ── DASHBOARD DATA ────────────────────────────────────────────
-function getDashboardData(filter) {
-  requireHod_();
+function getDashboardData(filter, key) {
+  requireHod_(key);
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return emptyDashboard();
@@ -728,8 +760,8 @@ function getDashboardData(filter) {
 }
 
 // ── PERSON DETAIL ─────────────────────────────────────────────
-function getPersonDetail(person, filter) {
-  requireHod_();
+function getPersonDetail(person, filter, key) {
+  requireHod_(key);
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return null;
@@ -837,8 +869,8 @@ function emptyDashboard() {
 }
 
 // ── COMPANY DETAIL ────────────────────────────────────────────
-function getCompanyDetail(company, filter) {
-  requireHod_();
+function getCompanyDetail(company, filter, key) {
+  requireHod_(key);
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return null;
@@ -922,8 +954,8 @@ function getCompanyDetail(company, filter) {
 }
 
 // ── JOB DETAIL ────────────────────────────────────────────────
-function getJobDetail(jobNumber, filter) {
-  requireHod_();
+function getJobDetail(jobNumber, filter, key) {
+  requireHod_(key);
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return null;
@@ -1929,8 +1961,8 @@ function buildCalendarImport_() {
 //    adds up AGENCY, DESIGN, ANIMATION, POST PRODUCTION and VIDEO.
 // A manually typed Budget (R) or pasted URL always wins — the sync never
 // overwrites a URL you entered yourself.
-function syncJobBudgets() {
-  requireHod_();
+function syncJobBudgets(key) {
+  requireHod_(key);
   return runBudgetSync_(false); // gap-fill only; daily trigger refreshes all
 }
 
@@ -2468,3 +2500,4 @@ function buildReminderHtml_(firstName, hrs, when) {
   );
 }
 // Deployed via clasp
+

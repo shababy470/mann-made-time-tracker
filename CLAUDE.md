@@ -27,7 +27,7 @@ handover was wrong, the correction is noted inline.
 | Apps Script project "Time tracker" | `12QLJffAthBngKU908QcXcgx8lr80s1AXsaL3mwLiVGdjHTL68qCZOFGe` |
 | Container spreadsheet "MANNMADE Time Log" | `1yZoZ_mfeEP37gZ1cfVFOVOJqB3a3hw1JyhtfIvJRV2U` |
 | Jobs list "MM Job Numbers" (read-only) | `1-ON0iZYt3gcum4eKDY8rtokI6SkSAOLam-HENf-fzf4` |
-| **Live deployment** (version 36, 27 Jul 2026) | `AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA` |
+| **Live deployment** (version 37, 17 Aug 2026) | `AKfycbz-f9MniexSzkyHBzQBBCL6sYTX3U7Tpo9berIlu3T4VdB1vTVnzfs49L-76o5GahuwtA` |
 
 Live web app URL — this is the one to hardcode in emails:
 
@@ -161,28 +161,41 @@ maintain the sheet and columns move. Keep it that way.
 
 ## Access control (as actually built)
 
-> **Correction:** the old handover described "Super Admin sees everything, HoDs
-> see themselves and their team". That is *not* what the code does.
+> **Rewritten 2026-08-17, by someone other than this project's earlier sessions.**
+> The `HOD_EMAILS` allowlist described in previous versions of this file **no
+> longer exists**. Dashboard access now follows the *link you open*, not the
+> person you are.
 
-There are two roles, resolved from the visitor's authenticated Google email
-(`Session.getActiveUser()`), so it can't be spoofed from the frontend:
+Two things must both be true to see all-staff data:
 
-- Email on the `HOD_EMAILS` allowlist (13 addresses, hardcoded at the top of
-  `Code.gs`) → **`hod`** — sees Track, My Logs, **and** Dashboard.
-- Any other `@mannmade.co.za` address → **`staff`** — Track and My Logs only.
-- Anything else → denied, shown `accessDeniedPage_()`.
+1. You are signed in with an `@mannmade.co.za` Google account. `roleForEmail_`
+   now returns only `'staff'` or `''` — the domain check is all it does.
+2. You opened the app with `?key=<HOD_KEY>` on the URL.
 
-HODs see **everyone's** data, not a filtered team view. There is no per-team
-structure anywhere in the code.
+| Link | What it gives |
+|---|---|
+| `.../exec` | **Team view** — Track + My Logs only |
+| `.../exec?key=<HOD_KEY>` | **HOD view** — adds Dashboard and Job Lookup |
 
-`doGet` gates the whole page; `requireAccess_()` and `requireHod_()` gate the
-individual server functions, so the dashboard data can't be pulled by a staff
-member calling the backend directly.
+`HOD_KEY` is a 64-character random string at the top of `Code.gs`, compared in
+constant time by `hodKeyValid_()`. To rotate it: change the value, redeploy, and
+circulate the new URL — the old link dies the moment the new version goes live.
 
-> **Correction:** the old handover said access was handled by having two
-> separate URLs (staff vs management). The code now does it in-app with one
-> deployment and a hidden Dashboard tab. Confirm in the Apps Script UI whether
-> a second legacy deployment still exists before assuming there's only one.
+**The key is checked in every HOD function, not just `doGet`.** `getDashboardData`,
+`getPersonDetail`, `getCompanyDetail`, `getJobDetail` and `syncJobBudgets` each
+take the key as their last argument and pass it to `requireHod_(key)`. That is
+deliberate and load-bearing: `google.script.run` calls bypass `doGet` entirely,
+so a team-link visitor could otherwise call the dashboard functions from the
+browser console. Hiding the tab is presentation; the key check is the lock.
+
+`Index.html` is now a **template**, not a static file. `doGet` renders it with
+`isHod` and `hodKey` baked in, so the team link's copy of the page never
+contains the key at all — there is nothing to find in the page source.
+
+Because the key travels in the URL, anyone who forwards an HOD link passes on
+Dashboard access to any signed-in MANNMADE account. That is the accepted
+trade-off of this design; the domain check is what stops a leaked link opening
+anything to an outsider.
 
 ---
 
@@ -470,5 +483,12 @@ gitignored and dies with the container — so this repeats each new session.
 editor UI. Chiefly the **Triggers** list — Google exposes no API for it. Ask
 Shayne to read it off the screen.
 
-Because `clasp push` overwrites the live script, always confirm the live code
-hasn't drifted (someone editing in the browser) before pushing.
+**`clasp pull` before you push — the live script does drift.** The August
+access-control rewrite was made outside these sessions and would have been
+silently clobbered by a push from a stale checkout. Pull first, diff, and only
+then push.
+
+`.clasp.json` sets `"scriptExtensions": ["gs"]`. Without it, clasp 3.x writes
+the backend as `Code.js` while the repo still holds `Code.gs`, leaving two files
+that both map to the same Apps Script file — a push from that state is a mess.
+Leave the setting in place.

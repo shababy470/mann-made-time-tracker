@@ -566,7 +566,14 @@
   var jobLookupHighlightIdx=-1,jobLookupData=null;
   var myLogsFilter='month',myLogsData=null,editingEntry=null;
 
-  var isHod=false;
+  // ACCESS — filled in by doGet when the page is rendered.
+  // Team link (.../exec):        isHod=false, HOD_KEY=''  → Track + My Logs.
+  // HOD link (.../exec?key=…):   isHod=true,  HOD_KEY set → everything.
+  // HOD_KEY rides along on every call that returns all-staff data; the server
+  // checks it again there, so hiding the tab is presentation, not the lock.
+  var isHod=<?= isHod ?>;
+  var HOD_KEY='<?= hodKey ?>';
+
   document.addEventListener('DOMContentLoaded',function(){
     restoreIdentity(); loadJobs(); setDefaultManualDate(); applyRole();
     document.getElementById('jobSearch').addEventListener('input',onJobSearch);
@@ -579,15 +586,18 @@
     });
   });
 
-  // ROLE — HODs see the Dashboard tab; everyone else gets Track + My Logs only.
+  // ROLE — the Dashboard tab is shown only on the HOD link. Everything it
+  // reaches is guarded server-side too, so a team-link visitor who unhides the
+  // tab gets "Not authorised" instead of data.
   // Also fills in the name box from the signed-in Google account and locks it:
   // the server now decides whose hours these are, so a typed name would only
   // mislead. If the account has no People row the box stays open, but every
   // action will come back with the server's "ask to be added" message.
   function applyRole(){
+    if(isHod)document.getElementById('tab-dashboard').style.display='';
     google.script.run.withSuccessHandler(function(role){
       isHod=!!(role&&role.isHod);
-      if(isHod)document.getElementById('tab-dashboard').style.display='';
+      document.getElementById('tab-dashboard').style.display=isHod?'':'none';
       var el=document.getElementById('person');
       if(role&&role.person){
         el.value=role.person;
@@ -599,7 +609,10 @@
       }else{
         el.placeholder='Not in the People sheet yet';
       }
-    }).withFailureHandler(function(){isHod=false;}).getUserRole();
+    }).withFailureHandler(function(){
+      isHod=false;
+      document.getElementById('tab-dashboard').style.display='none';
+    }).getUserRole(HOD_KEY);
   }
 
   // Shows the last-used name immediately so the field isn't blank while
@@ -686,7 +699,7 @@
     }).withFailureHandler(function(){
       btn.disabled=false;btn.textContent='⟳ Sync Budgets';
       showToast('SYNC FAILED');
-    }).syncJobBudgets();
+    }).syncJobBudgets(HOD_KEY);
   }
 
   // TIMER
@@ -716,7 +729,7 @@
   function errMsg(e,fallback){return (e&&e.message)?e.message:fallback;}
 
   // DASHBOARD
-  function loadDash(filter,btn){currentFilter=filter;document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active');});if(btn)btn.classList.add('active');document.getElementById('dashContent').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';google.script.run.withSuccessHandler(function(d){renderDash(d);dashLoaded=true;}).withFailureHandler(function(){document.getElementById('dashContent').innerHTML='<div class="empty-state">Error loading data</div>';}).getDashboardData(filter);}
+  function loadDash(filter,btn){currentFilter=filter;document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active');});if(btn)btn.classList.add('active');document.getElementById('dashContent').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';google.script.run.withSuccessHandler(function(d){renderDash(d);dashLoaded=true;}).withFailureHandler(function(){document.getElementById('dashContent').innerHTML='<div class="empty-state">Error loading data</div>';}).getDashboardData(filter,HOD_KEY);}
 
   function renderDash(d){
     var html='';
@@ -774,7 +787,7 @@
   function renderTrend(trend){var svg=document.getElementById('trendSvg'),labels=document.getElementById('trendLabels');if(!svg||!trend.length)return;var W=560,H=110,pL=8,pR=8,pT=10,pB=10,maxH=Math.max.apply(null,trend.map(function(t){return t.hrs;}))||1,n=trend.length,stepX=(W-pL-pR)/(n-1);var pts=trend.map(function(t,i){return{x:pL+i*stepX,y:pT+(H-pT-pB)*(1-t.hrs/maxH),hrs:t.hrs};});var area='M '+pts[0].x+' '+(H-pB);pts.forEach(function(p){area+=' L '+p.x+' '+p.y;});area+=' L '+pts[pts.length-1].x+' '+(H-pB)+' Z';var line='M '+pts[0].x+' '+pts[0].y;pts.slice(1).forEach(function(p){line+=' L '+p.x+' '+p.y;});var h='<defs><linearGradient id="tg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1a73e8" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a73e8" stop-opacity="0"/></linearGradient></defs><path d="'+area+'" fill="url(#tg)"/><path d="'+line+'" fill="none" stroke="#1a73e8" stroke-width="2"/>';pts.forEach(function(p){if(p.hrs>0)h+='<circle cx="'+p.x+'" cy="'+p.y+'" r="3" fill="#1a73e8"/>';});svg.innerHTML=h;labels.innerHTML=trend.map(function(t,i){var d=new Date(t.date+'T12:00:00'),lbl=i%3===0?d.getDate()+'/'+(d.getMonth()+1):'';return'<span class="trend-label">'+lbl+'</span>';}).join('');}
 
   // PERSON OVERLAY
-  function openPerson(person){personData=null;document.getElementById('personTitle').textContent=person;document.getElementById('personStats').innerHTML='';document.getElementById('personBackBtn').classList.add('hidden');document.getElementById('personBody').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';document.getElementById('personOverlay').classList.add('open');document.body.style.overflow='hidden';google.script.run.withSuccessHandler(function(d){personData=d;renderPersonJobs(d);}).withFailureHandler(function(){document.getElementById('personBody').innerHTML='<div class="empty-state">Error loading data</div>';}).getPersonDetail(person,currentFilter);}
+  function openPerson(person){personData=null;document.getElementById('personTitle').textContent=person;document.getElementById('personStats').innerHTML='';document.getElementById('personBackBtn').classList.add('hidden');document.getElementById('personBody').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';document.getElementById('personOverlay').classList.add('open');document.body.style.overflow='hidden';google.script.run.withSuccessHandler(function(d){personData=d;renderPersonJobs(d);}).withFailureHandler(function(){document.getElementById('personBody').innerHTML='<div class="empty-state">Error loading data</div>';}).getPersonDetail(person,currentFilter,HOD_KEY);}
 
   function renderPersonJobs(d){
     if(!d){document.getElementById('personBody').innerHTML='<div class="empty-state">No entries found for this period</div>';return;}
@@ -791,7 +804,7 @@
   function backToJobs(){if(!personData)return;document.getElementById('personTitle').textContent=personData.person;renderPersonJobs(personData);}
 
   // COMPANY OVERLAY
-  function openCompany(company){companyData=null;document.getElementById('companyTitle').textContent=company;document.getElementById('companyStats').innerHTML='';document.getElementById('companyBody').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';document.getElementById('companyOverlay').classList.add('open');document.body.style.overflow='hidden';google.script.run.withSuccessHandler(function(d){companyData=d;renderCompany(d);}).withFailureHandler(function(){document.getElementById('companyBody').innerHTML='<div class="empty-state">Error loading data</div>';}).getCompanyDetail(company,currentFilter);}
+  function openCompany(company){companyData=null;document.getElementById('companyTitle').textContent=company;document.getElementById('companyStats').innerHTML='';document.getElementById('companyBody').innerHTML='<div class="dash-loading"><div class="spinner"></div></div>';document.getElementById('companyOverlay').classList.add('open');document.body.style.overflow='hidden';google.script.run.withSuccessHandler(function(d){companyData=d;renderCompany(d);}).withFailureHandler(function(){document.getElementById('companyBody').innerHTML='<div class="empty-state">Error loading data</div>';}).getCompanyDetail(company,currentFilter,HOD_KEY);}
 
   function renderCompany(d){
     if(!d){document.getElementById('companyBody').innerHTML='<div class="empty-state">No entries found for this period</div>';return;}
@@ -884,7 +897,7 @@
     google.script.run
       .withSuccessHandler(function(d){jobLookupData=d;renderJobDetail(d,jobNumber);})
       .withFailureHandler(function(){document.getElementById('jobLookupBody').innerHTML='<div class="empty-state">Error loading data</div>';})
-      .getJobDetail(jobNumber,currentFilter);
+      .getJobDetail(jobNumber,currentFilter,HOD_KEY);
   }
   function renderJobDetail(d,jobNumber){
     var meta=null;
