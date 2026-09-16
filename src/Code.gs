@@ -1860,7 +1860,12 @@ function testFindJetourBudget() {
 // ============================================================
 
 var IMPORT_PERSON  = 'shayne mann';   // must match your name in the tracker/People sheet
-var IMPORT_KEYWORD = 'liberty';       // event titles containing this get imported
+// Event titles containing ANY of these get imported (case-insensitive).
+// "challenge" is here because most Liberty meetings are titled "Challenge 2026"
+// and never say Liberty — on 2026-09-09 that was 22 meetings and 24.5 hours the
+// keyword alone did not see. Always run previewCalendarImport first: a broader
+// keyword can also pull in work that belongs to another job.
+var IMPORT_KEYWORDS = ['liberty', 'challenge'];
 var IMPORT_JOB     = { number: 'MM02755', name: 'Liberty - Challenge 2026', company: 'Liberty' };
 var IMPORT_FROM    = '2026-04-27';    // look at events from this date onwards
 
@@ -1909,7 +1914,15 @@ function buildCalendarImport_() {
   var now  = new Date();
   var events = cal.getEvents(from, now);
   var tz = Session.getScriptTimeZone();
-  var kw = IMPORT_KEYWORD.toLowerCase();
+
+  // True if an event title mentions any of the import keywords.
+  function titleMatches_(title) {
+    var t = String(title || '').toLowerCase();
+    for (var i = 0; i < IMPORT_KEYWORDS.length; i++) {
+      if (t.indexOf(String(IMPORT_KEYWORDS[i]).toLowerCase()) !== -1) return true;
+    }
+    return false;
+  }
 
   // Existing Time Log entries for this person+job → skip already-logged slots
   var logged = {};
@@ -1920,7 +1933,14 @@ function buildCalendarImport_() {
       if (String(r[1] || '').trim().toLowerCase() !== IMPORT_PERSON.toLowerCase()) return;
       if (String(r[2] || '').trim() !== IMPORT_JOB.number) return;
       var date = r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'yyyy-MM-dd') : String(r[0]).substring(0, 10);
-      var st   = String(r[6] || '').substring(0, 5);
+      // Start Time is stored as a real time value, so this cell comes back as a
+      // Date, not text. It used to be read with String(r[6]).substring(0,5),
+      // which yields "Sat D" — never matching an "HH:mm" key, so nothing was
+      // ever skipped and every run re-imported what was already there. That is
+      // where the duplicated Liberty hours came from.
+      var st = r[6] instanceof Date
+        ? Utilities.formatDate(r[6], tz, 'HH:mm')
+        : String(r[6] || '').substring(0, 5);
       logged[date + ' ' + st] = true;
     });
   }
@@ -1929,7 +1949,7 @@ function buildCalendarImport_() {
   events.forEach(function(ev) {
     if (ev.isAllDayEvent()) return;
     var title = ev.getTitle() || '';
-    if (title.toLowerCase().indexOf(kw) === -1) return;
+    if (!titleMatches_(title)) return;
     var start = ev.getStartTime(), end = ev.getEndTime();
     if (end > now) return; // only the past
     var key = Utilities.formatDate(start, tz, 'yyyy-MM-dd HH:mm');
