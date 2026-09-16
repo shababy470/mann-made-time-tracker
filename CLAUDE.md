@@ -376,10 +376,9 @@ Three installer functions exist and are run by hand from the editor:
   chosen list. Note: a weekly *per-person* digest already exists
   (`sendWeeklyDigests`); this is the per-job variant.
 - **Calendar drafts** — pull the previous day's Google Calendar events in as
-  pre-filled draft entries to accept, edit, or discard. Partly built:
-  `getCalendarEvents` is already wired to the frontend, and
-  `importCalendarMeetings` exists but is hardcoded to one person and one job
-  (`IMPORT_PERSON` / `IMPORT_JOB`, ~line 1740) — it's a one-off, not a feature.
+  pre-filled draft entries to accept, edit, or discard. `getCalendarEvents` is
+  already wired to the frontend. The back-import is no longer a one-off: see
+  Calendar back-import below.
 - **Quick-capture field** — dump "2h Woolworths deck" during the day, convert
   to proper entries later.
 - **Simplified view for overhead roles** — Dean (IT) and Shelley (finance).
@@ -427,6 +426,41 @@ Quotes lean humane over hustle-culture on purpose. They are the company's voice,
 so check any addition sounds like MANNMADE — and check attribution, since famous
 quotes are widely misattributed ("The trouble is, you think you have time" is
 Jack Kornfield's, not the Buddha's, though it is nearly always credited to him).
+
+---
+
+## Calendar back-import
+
+`IMPORT_PROFILES` in `Code.gs` holds one entry per person+job, each with a
+matching `preview…` / `import…` pair run by hand from the editor's function
+dropdown. Adding someone is a config entry, not a code change.
+
+| Field | Meaning |
+|---|---|
+| `person` | Name written into the Time Log. **Must match their `People` row**, or the entries never appear in their own My Logs. |
+| `calendar` | `''` reads the runner's own diary. An email reads that person's, which works only if it is visible to the account running the import. |
+| `keywords` | Title must contain one of these. |
+| `from` | Ignore events before this date. |
+
+Three things it deliberately does:
+
+- **Writes directly to the sheet, not through `logTime`.** `logTime` files time
+  under whoever is signed in; this has to file it under `cfg.person`.
+- **Skips what is already logged**, matched on person + job + date + start time,
+  so running a profile twice is safe. That check was broken until 2026-09-16 —
+  it compared a Date against an `"HH:mm"` string and so never matched, which is
+  where the duplicated Liberty hours came from. Don't reintroduce that.
+- **Skips events the person declined.** They did not attend, so it is not their
+  time.
+
+**A calendar is a floor, not the truth.** It captures meetings, not work. For
+Aysha (an event producer) 74 diary hours almost certainly understates a job
+where most of the effort is site visits and build days. Treat an import as a
+starting point the person then tops up, and say so when asking them to check it.
+
+**Watch RSVP assumptions.** Filtering to "accepted only" sounds sensible and is
+not: Aysha leaves 68 of 74 invitations unanswered, so that filter would have
+returned 4.5 hours instead of 73.7.
 
 ---
 

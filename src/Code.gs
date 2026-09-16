@@ -1855,28 +1855,64 @@ function testFindJetourBudget() {
 
 // ============================================================
 // CALENDAR BACK-IMPORT — pull past meetings into the Time Log
-// Edit the settings below, run previewCalendarImport() to check,
-// then importCalendarMeetings() to write the entries.
+//
+// Add a profile below, then run its preview/import pair from the function
+// dropdown. Preview writes nothing; import appends to the Time Log.
+//
+//   person   — the name written into the Time Log. Must match that person's
+//              People sheet name, or the entries will not show in their My Logs.
+//   calendar — '' reads the calendar of whoever runs the import. An email reads
+//              that person's calendar instead, which only works if it is
+//              visible to the account running it.
+//   keywords — event titles containing ANY of these are imported.
+//   from     — only look at events on or after this date.
+//
+// Imported entries are matched against what is already logged for that person
+// and job, so running a profile twice does not duplicate anything.
 // ============================================================
 
-var IMPORT_PERSON  = 'shayne mann';   // must match your name in the tracker/People sheet
-// Event titles containing ANY of these get imported (case-insensitive).
-// "challenge" is here because most Liberty meetings are titled "Challenge 2026"
-// and never say Liberty — on 2026-09-09 that was 22 meetings and 24.5 hours the
-// keyword alone did not see. Always run previewCalendarImport first: a broader
-// keyword can also pull in work that belongs to another job.
-var IMPORT_KEYWORDS = ['liberty', 'challenge'];
-var IMPORT_JOB     = { number: 'MM02755', name: 'Liberty - Challenge 2026', company: 'Liberty' };
-var IMPORT_FROM    = '2026-04-27';    // look at events from this date onwards
+var IMPORT_PROFILES = {
+  shayneLiberty: {
+    person:   'shayne mann',
+    calendar: '',                      // Shayne runs this against his own diary
+    keywords: ['liberty', 'challenge'],
+    job:      { number: 'MM02755', name: 'Liberty - Challenge 2026', company: 'Liberty' },
+    from:     '2026-04-27'
+  },
+  ayshaLiberty: {
+    person:   'Aysha Outram',
+    calendar: 'aysha@mannmade.co.za',  // read from Shayne's account
+    keywords: ['liberty', 'challenge'],
+    job:      { number: 'MM02755', name: 'Liberty - Challenge 2026', company: 'Liberty' },
+    from:     '2026-07-01'             // nothing Liberty in her diary before this
+  }
+};
 
-function previewCalendarImport() {
-  var plan = buildCalendarImport_();
-  Logger.log(plan.summary);
-  return plan.summary;
+// "challenge" is in the keyword lists because most Liberty meetings are titled
+// "Challenge 2026" and never mention Liberty — on 2026-09-09 that was 22
+// meetings and 24.5 hours the narrower keyword could not see. Always preview
+// first: a broad keyword can also pull in work belonging to another job.
+
+function importProfile_(name) {
+  var cfg = IMPORT_PROFILES[name];
+  if (!cfg) throw new Error('No import profile called "' + name + '".');
+  return cfg;
 }
 
-function importCalendarMeetings() {
-  var plan = buildCalendarImport_();
+function logAndReturn_(msg) { Logger.log(msg); return msg; }
+
+// ── Run these by hand from the editor's function dropdown ─────
+function previewCalendarImport() { return logAndReturn_(buildCalendarImport_(importProfile_('shayneLiberty')).summary); }
+function importCalendarMeetings() { return logAndReturn_(runCalendarImport_(importProfile_('shayneLiberty'))); }
+
+function previewAyshaLiberty()    { return logAndReturn_(buildCalendarImport_(importProfile_('ayshaLiberty')).summary); }
+function importAyshaLiberty()     { return logAndReturn_(runCalendarImport_(importProfile_('ayshaLiberty'))); }
+
+// Writes the planned entries to the Time Log. Appends directly rather than
+// going through logTime, because logTime files time under whoever is signed in
+// and this deliberately files it under cfg.person.
+function runCalendarImport_(cfg) {
+  var plan = buildCalendarImport_(cfg);
   if (!plan.entries.length) return 'Nothing to import. ' + plan.summary;
 
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
@@ -1887,10 +1923,10 @@ function importCalendarMeetings() {
   var rows = plan.entries.map(function(ev) {
     return [
       Utilities.formatDate(ev.start, tz, 'yyyy-MM-dd'),
-      IMPORT_PERSON,
-      IMPORT_JOB.number,
-      IMPORT_JOB.name,
-      IMPORT_JOB.company,
+      cfg.person,
+      cfg.job.number,
+      cfg.job.name,
+      cfg.job.company,
       ev.title,
       Utilities.formatDate(ev.start, tz, 'HH:mm:ss'),
       Utilities.formatDate(ev.end,   tz, 'HH:mm:ss'),
@@ -1903,25 +1939,44 @@ function importCalendarMeetings() {
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 12).setValues(rows);
 
   var total = plan.entries.reduce(function(s, e) { return s + e.hrs; }, 0);
-  var msg = 'Imported ' + rows.length + ' meetings (' + total.toFixed(2) + 'h) into ' + IMPORT_JOB.number + '. ' + plan.skippedNote;
-  Logger.log(msg);
-  return msg;
+  return 'Imported ' + rows.length + ' meetings (' + total.toFixed(2) + 'h) into ' +
+         cfg.job.number + ' as ' + cfg.person + '. ' + plan.skippedNote;
 }
 
-function buildCalendarImport_() {
-  var cal = CalendarApp.getDefaultCalendar();
-  var from = new Date(IMPORT_FROM + 'T00:00:00');
+function buildCalendarImport_(cfg) {
+  var whose = cfg.calendar || Session.getEffectiveUser().getEmail();
+  var cal = cfg.calendar
+    ? CalendarApp.getCalendarById(cfg.calendar)
+    : CalendarApp.getDefaultCalendar();
+  if (!cal) {
+    throw new Error('Cannot open the calendar for ' + whose + '. Ask them to share it with ' +
+                    Session.getEffectiveUser().getEmail() + ', including event details.');
+  }
+
+  var from = new Date(cfg.from + 'T00:00:00');
   var now  = new Date();
   var events = cal.getEvents(from, now);
   var tz = Session.getScriptTimeZone();
 
-  // True if an event title mentions any of the import keywords.
+  // True if an event title mentions any of this profile's keywords.
   function titleMatches_(title) {
     var t = String(title || '').toLowerCase();
-    for (var i = 0; i < IMPORT_KEYWORDS.length; i++) {
-      if (t.indexOf(String(IMPORT_KEYWORDS[i]).toLowerCase()) !== -1) return true;
+    for (var i = 0; i < cfg.keywords.length; i++) {
+      if (t.indexOf(String(cfg.keywords[i]).toLowerCase()) !== -1) return true;
     }
     return false;
+  }
+
+  // Someone who declined did not attend, so it is not their time. Note this
+  // asks for THIS profile's person, not whoever is running the import. Wrapped
+  // because getGuestByEmail throws on some event types; on doubt we keep it.
+  function declined_(ev) {
+    try {
+      var g = ev.getGuestByEmail(whose);
+      return !!g && g.getGuestStatus() === CalendarApp.GuestStatus.NO;
+    } catch (err) {
+      return false;
+    }
   }
 
   // Existing Time Log entries for this person+job → skip already-logged slots
@@ -1930,8 +1985,8 @@ function buildCalendarImport_() {
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (sheet && sheet.getLastRow() >= 2) {
     sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues().forEach(function(r) {
-      if (String(r[1] || '').trim().toLowerCase() !== IMPORT_PERSON.toLowerCase()) return;
-      if (String(r[2] || '').trim() !== IMPORT_JOB.number) return;
+      if (String(r[1] || '').trim().toLowerCase() !== cfg.person.toLowerCase()) return;
+      if (String(r[2] || '').trim() !== cfg.job.number) return;
       var date = r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'yyyy-MM-dd') : String(r[0]).substring(0, 10);
       // Start Time is stored as a real time value, so this cell comes back as a
       // Date, not text. It used to be read with String(r[6]).substring(0,5),
@@ -1945,13 +2000,14 @@ function buildCalendarImport_() {
     });
   }
 
-  var seen = {}, entries = [], skippedDup = 0, skippedLogged = 0;
+  var seen = {}, entries = [], skippedDup = 0, skippedLogged = 0, skippedDeclined = 0;
   events.forEach(function(ev) {
     if (ev.isAllDayEvent()) return;
     var title = ev.getTitle() || '';
     if (!titleMatches_(title)) return;
     var start = ev.getStartTime(), end = ev.getEndTime();
     if (end > now) return; // only the past
+    if (declined_(ev)) { skippedDeclined++; return; }
     var key = Utilities.formatDate(start, tz, 'yyyy-MM-dd HH:mm');
     if (seen[key]) { skippedDup++; return; }        // same-slot duplicates
     seen[key] = true;
@@ -1966,11 +2022,13 @@ function buildCalendarImport_() {
   var lines = entries.map(function(e) {
     return Utilities.formatDate(e.start, tz, 'EEE d MMM HH:mm') + ' · ' + e.hrs.toFixed(2) + 'h · ' + e.title;
   });
-  var skippedNote = '(skipped: ' + skippedDup + ' duplicate slot(s), ' + skippedLogged + ' already logged)';
+  var skippedNote = '(skipped: ' + skippedDup + ' duplicate slot(s), ' + skippedLogged +
+                    ' already logged, ' + skippedDeclined + ' declined)';
   return {
     entries: entries,
     skippedNote: skippedNote,
-    summary: 'Will import ' + entries.length + ' meetings, ' + total.toFixed(2) + 'h total, into ' + IMPORT_JOB.number + ' as ' + IMPORT_PERSON + ' ' + skippedNote + ':\n' + lines.join('\n')
+    summary: 'Will import ' + entries.length + ' meetings, ' + total.toFixed(2) + 'h total, into ' +
+             cfg.job.number + ' as ' + cfg.person + ' ' + skippedNote + ':\n' + lines.join('\n')
   };
 }
 
