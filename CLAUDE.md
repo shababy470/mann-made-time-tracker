@@ -419,6 +419,16 @@ Jack Kornfield's, not the Buddha's, though it is nearly always credited to him).
 
 ## Working practices
 
+- **Client asks for a timesheet:** `tools/build-job-timesheet.py` builds one for
+  a single job from a Drive export of the Time Log. It combines people who
+  logged under two spellings of their name, drops exact duplicate entries onto a
+  visible "Removed" tab rather than billing them, and cross-checks its totals
+  three ways before saving. Generated `.xlsx` files are gitignored — they carry
+  staff hours and are reproducible from the script.
+  **LibreOffice cannot recalculate in this sandbox** (it times out on a
+  three-cell file), so that script writes verified values rather than formulas.
+  Don't "fix" it to use formulas without checking `recalc.py` actually runs.
+
 - Build incrementally: get one thing working, confirm it, then layer the next.
   Large rewrites are hard for Shayne to verify.
 - This app emails staff. A bad deploy reaches real people. **After any deploy
